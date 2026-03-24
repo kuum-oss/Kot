@@ -15,7 +15,7 @@ class ReplayTest {
     @Test
     fun `should restore order book state from events`() = runBlocking {
         val eventStore = InMemoryEventStore()
-        val instrumentId = "REPLAY-BTC"
+        val instrumentId = "BTC/USD"
         
         // 1. Manually append some events
         val userId = UUID.randomUUID()
@@ -41,15 +41,28 @@ class ReplayTest {
         
         // Since replay is in init (synchronous for OrderBook, but actor loop starts after),
         // we can check if it already matched another order.
-        
-        // Place a matching sell order
+        //  Creat ID for selle
+        val sellerId = UUID.randomUUID()
+
+        // Give him balanc (maybe, 10 BTC)
+        balanceService.applyEvent(
+            org.example.events.BalanceChanged(
+                aggregateId = sellerId.toString(),
+                timestamp = Instant.now(),
+                currency = org.example.domain.Currency.BTC,
+                amount = BigDecimal("10"),
+                reason = "Test Deposit"
+            )
+        )
+
         actor.send(PlaceOrder(
             instrumentId = instrumentId,
-            userId = UUID.randomUUID(),
+            userId = sellerId,
             side = Side.SELL,
             price = BigDecimal("10000"),
             quantity = BigDecimal("1")
         ))
+
         
         // Wait for processing
         var attempts = 0
@@ -59,8 +72,8 @@ class ReplayTest {
         }
         
         val stream = eventStore.getStream(instrumentId)
-        // Expected: OrderPlaced (1st), OrderPlaced (2nd), OrderMatched
-        assertEquals(3, stream.size)
+        // Expected: OrderPlaced (1st), OrderPlaced (3nd), OrderMatched
+        assertEquals(4, stream.size)
         assert(stream.any { it is org.example.events.OrderMatched })
         
         scope.cancel()
