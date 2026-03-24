@@ -15,8 +15,9 @@ class ConcurrentTradingTest {
     @Test
     fun `should handle concurrent orders for same instrument`() = runBlocking {
         val eventStore = InMemoryEventStore()
+        val balanceService = BalanceService()
         val scope = CoroutineScope(Dispatchers.Default + Job())
-        val engine = TradingEngine(eventStore, scope)
+        val engine = TradingEngine(eventStore, balanceService, scope)
         val instrumentId = "BTC/USD"
         
         val numUsers = 100
@@ -26,12 +27,29 @@ class ConcurrentTradingTest {
         val counter = AtomicInteger(0)
         
         val jobs = List(numUsers) { userId ->
+            val uId = UUID.randomUUID()
+            // Initial balance for user
+            balanceService.applyEvent(org.example.events.BalanceChanged(
+                aggregateId = uId.toString(),
+                timestamp = java.time.Instant.now(),
+                currency = org.example.domain.Currency.USD,
+                amount = BigDecimal("1000000"),
+                reason = "test"
+            ))
+            balanceService.applyEvent(org.example.events.BalanceChanged(
+                aggregateId = uId.toString(),
+                timestamp = java.time.Instant.now(),
+                currency = org.example.domain.Currency.BTC,
+                amount = BigDecimal("1000"),
+                reason = "test"
+            ))
+
             launch {
                 repeat(ordersPerUser) {
                     val side = if (it % 2 == 0) Side.BUY else Side.SELL
                     engine.process(PlaceOrder(
                         instrumentId = instrumentId,
-                        userId = UUID.randomUUID(),
+                        userId = uId,
                         side = side,
                         price = BigDecimal("100"),
                         quantity = BigDecimal("1")

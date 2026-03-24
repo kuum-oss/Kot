@@ -7,6 +7,7 @@ import org.example.store.InMemoryEventStore
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Instant
 import java.util.*
 
 class ReplayTest {
@@ -19,9 +20,11 @@ class ReplayTest {
         // 1. Manually append some events
         val userId = UUID.randomUUID()
         val order1Id = UUID.randomUUID()
+        val timestamp = Instant.now()
         val events = listOf(
             org.example.events.OrderPlaced(
                 aggregateId = instrumentId,
+                timestamp = timestamp,
                 orderId = order1Id,
                 userId = userId,
                 side = Side.BUY,
@@ -32,8 +35,9 @@ class ReplayTest {
         eventStore.append(instrumentId, 0, events)
         
         // 2. Start engine - it should replay events
+        val balanceService = BalanceService()
         val scope = CoroutineScope(Dispatchers.Default + Job())
-        val actor = MatchingActor(instrumentId, eventStore, scope)
+        val actor = MatchingActor(instrumentId, eventStore, balanceService, scope = scope)
         
         // Since replay is in init (synchronous for OrderBook, but actor loop starts after),
         // we can check if it already matched another order.

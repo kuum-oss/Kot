@@ -16,17 +16,18 @@ class MatchingTest {
     fun `should match multiple orders and follow price-time priority`() {
         val instrumentId = "BTC/USD"
         val orderBook = OrderBook(instrumentId)
+        val timestamp = Instant.now()
 
         // 1. BUY 100 @ 10
-        val buy100at10 = Order(UUID.randomUUID(), UUID.randomUUID(), Side.BUY, BigDecimal("10"), BigDecimal("100"), Instant.now())
-        val buyEvents = orderBook.match(buy100at10)
+        val buy100at10 = Order(UUID.randomUUID(), UUID.randomUUID(), Side.BUY, BigDecimal("10"), BigDecimal("100"), timestamp)
+        val buyEvents = orderBook.match(buy100at10, timestamp)
         assertEquals(1, buyEvents.size)
         assertEquals(OrderPlaced::class, buyEvents[0]::class)
         buyEvents.forEach { orderBook.applyEvent(it) }
 
         // 2. SELL 50 @ 9 (should match)
-        val sell50at9 = Order(UUID.randomUUID(), UUID.randomUUID(), Side.SELL, BigDecimal("9"), BigDecimal("50"), Instant.now())
-        val match1Events = orderBook.match(sell50at9)
+        val sell50at9 = Order(UUID.randomUUID(), UUID.randomUUID(), Side.SELL, BigDecimal("9"), BigDecimal("50"), timestamp)
+        val match1Events = orderBook.match(sell50at9, timestamp)
         // Should contain OrderPlaced for Taker AND OrderMatched
         assertEquals(2, match1Events.size)
         val match1 = match1Events.find { it is OrderMatched } as OrderMatched
@@ -35,8 +36,8 @@ class MatchingTest {
         match1Events.forEach { orderBook.applyEvent(it) }
 
         // 3. SELL 50 @ 10 (should match remaining)
-        val sell50at10 = Order(UUID.randomUUID(), UUID.randomUUID(), Side.SELL, BigDecimal("10"), BigDecimal("50"), Instant.now())
-        val match2Events = orderBook.match(sell50at10)
+        val sell50at10 = Order(UUID.randomUUID(), UUID.randomUUID(), Side.SELL, BigDecimal("10"), BigDecimal("50"), timestamp)
+        val match2Events = orderBook.match(sell50at10, timestamp)
         assertEquals(2, match2Events.size)
         val match2 = match2Events.find { it is OrderMatched } as OrderMatched
         assertEquals(BigDecimal("50"), match2.quantity)
@@ -51,18 +52,19 @@ class MatchingTest {
     @Test
     fun `should follow price priority for asks`() {
          val orderBook = OrderBook("TEST")
+         val timestamp = Instant.now()
          
          // Sell 10 @ 100
-         val sell1 = Order(UUID.randomUUID(), UUID.randomUUID(), Side.SELL, BigDecimal("100"), BigDecimal("10"), Instant.now())
-         orderBook.match(sell1).forEach { orderBook.applyEvent(it) }
+         val sell1 = Order(UUID.randomUUID(), UUID.randomUUID(), Side.SELL, BigDecimal("100"), BigDecimal("10"), timestamp)
+         orderBook.match(sell1, timestamp).forEach { orderBook.applyEvent(it) }
          
          // Sell 10 @ 90
-         val sell2 = Order(UUID.randomUUID(), UUID.randomUUID(), Side.SELL, BigDecimal("90"), BigDecimal("10"), Instant.now())
-         orderBook.match(sell2).forEach { orderBook.applyEvent(it) }
+         val sell2 = Order(UUID.randomUUID(), UUID.randomUUID(), Side.SELL, BigDecimal("90"), BigDecimal("10"), timestamp)
+         orderBook.match(sell2, timestamp).forEach { orderBook.applyEvent(it) }
          
          // Buy 15 @ 110. Should match 10@90 first, then 5@100
-         val buy = Order(UUID.randomUUID(), UUID.randomUUID(), Side.BUY, BigDecimal("110"), BigDecimal("15"), Instant.now())
-         val matches = orderBook.match(buy).filterIsInstance<OrderMatched>()
+         val buy = Order(UUID.randomUUID(), UUID.randomUUID(), Side.BUY, BigDecimal("110"), BigDecimal("15"), timestamp)
+         val matches = orderBook.match(buy, timestamp).filterIsInstance<OrderMatched>()
          
          assertEquals(2, matches.size)
          assertEquals(BigDecimal("90"), matches[0].price)
