@@ -8,7 +8,6 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.util.*
-import java.util.concurrent.atomic.AtomicInteger
 
 class ConcurrentTradingTest {
 
@@ -24,11 +23,8 @@ class ConcurrentTradingTest {
         val ordersPerUser = 10
         val totalOrders = numUsers * ordersPerUser
         
-        val counter = AtomicInteger(0)
-        
-        val jobs = List(numUsers) { userId ->
+        val jobs = List(numUsers) { _ ->
             val uId = UUID.randomUUID()
-            // Initial balance for user
             balanceService.applyEvent(org.example.events.BalanceChanged(
                 aggregateId = uId.toString(),
                 timestamp = java.time.Instant.now(),
@@ -54,27 +50,20 @@ class ConcurrentTradingTest {
                         price = BigDecimal("100"),
                         quantity = BigDecimal("1")
                     ))
-                    counter.incrementAndGet()
                 }
             }
         }
-        
+
         jobs.joinAll()
-        
-        // Wait for actor to finish processing
-        // Since we use UNLIMITED channel and actors process sequentially, 
-        // we need a way to know it's done.
-        // For test, we can just wait or check event store size.
-        
-        var attempts = 0
-        while (eventStore.getStream(instrumentId).filterIsInstance<org.example.events.OrderPlaced>().size < totalOrders && attempts < 50) {
-            delay(100)
-            attempts++
-        }
-        
-        val placedEvents = eventStore.getStream(instrumentId).filterIsInstance<org.example.events.OrderPlaced>()
+
+        // Deterministic: wait for the actor to finish all enqueued commands
+        // by sending a drain sentinel through the same channel.
+        engine.drain()
+
+        val placedEvents = eventStore.getStream(instrumentId)
+            .filterIsInstance<org.example.events.OrderPlaced>()
         assertEquals(totalOrders, placedEvents.size, "All orders should be placed")
-        
+
         scope.cancel()
     }
 }

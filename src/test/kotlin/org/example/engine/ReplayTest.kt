@@ -17,8 +17,8 @@ class ReplayTest {
         val eventStore = InMemoryEventStore()
         val instrumentId = "BTC/USD"
 
-        // 1. Manually append some events
-        val userId = UUID.randomUUID()
+        // 1. Pre-seed an existing BUY order directly into the event store
+        val buyerId = UUID.randomUUID()
         val order1Id = UUID.randomUUID()
         val timestamp = Instant.now()
         val events = listOf(
@@ -26,7 +26,7 @@ class ReplayTest {
                 aggregateId = instrumentId,
                 timestamp = timestamp,
                 orderId = order1Id,
-                userId = userId,
+                userId = buyerId,
                 side = Side.BUY,
                 price = BigDecimal("10000"),
                 quantity = BigDecimal("1")
@@ -34,17 +34,13 @@ class ReplayTest {
         )
         eventStore.append(instrumentId, 0, events)
 
-        // 2. Start engine - it should replay events
+        // 2. Start actor — it replays the existing event stream in init{}
         val balanceService = BalanceService()
         val scope = CoroutineScope(Dispatchers.Default + Job())
         val actor = MatchingActor(instrumentId, eventStore, balanceService, scope = scope)
 
-        // Since replay is in init (synchronous for OrderBook, but actor loop starts after),
-        // we can check if it already matched another order.
-        //  Creat ID for selle
+        // 3. Give the seller a balance and send a matching SELL order
         val sellerId = UUID.randomUUID()
-
-        // Give him balanc (maybe, 10 BTC)
         balanceService.applyEvent(
             org.example.events.BalanceChanged(
                 aggregateId = sellerId.toString(),
@@ -63,20 +59,15 @@ class ReplayTest {
             quantity = BigDecimal("1")
         ))
 
-
-        // Wait for processing
-        var attempts = 0
-        while (eventStore.getStream(instrumentId).size < 3 && attempts < 20) {
-            delay(100)
-            attempts++
-        }
+        // 4. Deterministic wait: drain flushes the sentinel through the same channel,
+        //    guaranteeing the SELL command is fully processed before we assert.
+        actor.drain()
 
         val stream = eventStore.getStream(instrumentId)
-        // Expected: OrderPlaced (1st), OrderPlaced (3nd), OrderMatched
+        // Expected: OrderPlaced (BUY seed), BalanceLocked, OrderPlaced (SELL), OrderMatched
         assertEquals(4, stream.size)
         assert(stream.any { it is org.example.events.OrderMatched })
 
         scope.cancel()
     }
 }
-//fee

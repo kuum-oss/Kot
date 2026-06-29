@@ -1,5 +1,6 @@
 package org.example.engine
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
@@ -13,6 +14,12 @@ import org.slf4j.LoggerFactory
 import java.time.Instant
 import java.util.UUID
 
+/** Internal message envelope for the actor channel. */
+private sealed interface ActorMessage {
+    data class Cmd(val command: Command) : ActorMessage
+    data class Drain(val latch: CompletableDeferred<Unit>) : ActorMessage
+}
+
 class MatchingActor(
     val instrumentId: String,
     private val eventStore: EventStore,
@@ -21,10 +28,10 @@ class MatchingActor(
     scope: CoroutineScope
 ) {
     private val logger = LoggerFactory.getLogger(MatchingActor::class.java)
-    private val commandChannel = when (strategy) {
-        is OverloadStrategy.Drop -> Channel<Command>(1000) // Fixed size
-        is OverloadStrategy.Backpressure -> Channel<Command>(Channel.BUFFERED)
-        is OverloadStrategy.Degrade -> Channel<Command>(Channel.UNLIMITED)
+    private val actorChannel: Channel<ActorMessage> = when (strategy) {
+        is OverloadStrategy.Drop -> Channel(1000)
+        is OverloadStrategy.Backpressure -> Channel(Channel.BUFFERED)
+        is OverloadStrategy.Degrade -> Channel(Channel.UNLIMITED)
     }
     private val orderBook = OrderBook(instrumentId)
     private val idempotencyRegistry = mutableSetOf<UUID>()
@@ -39,16 +46,22 @@ class MatchingActor(
         }
         
         scope.launch {
-            for (command in commandChannel) {
-                try {
-                    if (idempotencyRegistry.contains(command.id)) {
-                        logger.warn("Duplicate command: ${command.id}")
-                        continue
+            for (msg in actorChannel) {
+                when (msg) {
+                    is ActorMessage.Drain -> msg.latch.complete(Unit)
+                    is ActorMessage.Cmd -> {
+                        val command = msg.command
+                        try {
+                            if (idempotencyRegistry.contains(command.id)) {
+                                logger.warn("Duplicate command: {}", command.id)
+                                continue
+                            }
+                            handleCommand(command)
+                            idempotencyRegistry.add(command.id)
+                        } catch (e: Exception) {
+                            logger.error("Error handling command: {}", command, e)
+                        }
                     }
-                    handleCommand(command)
-                    idempotencyRegistry.add(command.id)
-                } catch (e: Exception) {
-                    logger.error("Error handling command: $command", e)
                 }
             }
         }
@@ -57,15 +70,26 @@ class MatchingActor(
     suspend fun send(command: Command): Boolean {
         return when (strategy) {
             is OverloadStrategy.Drop -> {
-                val success = commandChannel.trySend(command).isSuccess
-                if (!success) logger.warn("Command dropped due to overload: ${command.id}")
+                val success = actorChannel.trySend(ActorMessage.Cmd(command)).isSuccess
+                if (!success) logger.warn("Command dropped due to overload: {}", command.id)
                 success
             }
             else -> {
-                commandChannel.send(command)
+                actorChannel.send(ActorMessage.Cmd(command))
                 true
             }
         }
+    }
+
+    /**
+     * Sends a drain sentinel through the same channel and suspends until the actor
+     * has processed all previously enqueued commands. Use this in tests instead of
+     * polling with delay() for deterministic synchronization.
+     */
+    suspend fun drain() {
+        val latch = CompletableDeferred<Unit>()
+        actorChannel.send(ActorMessage.Drain(latch))
+        latch.await()
     }
 
     private suspend fun handleCommand(command: Command) {

@@ -20,4 +20,9 @@ class TradingEngine(
         }
         return actor.send(command)
     }
+
+    /** Drains all actor queues. Call after sending all commands in tests. */
+    suspend fun drain() {
+        actors.values.forEach { it.drain() }
+    }
 }
