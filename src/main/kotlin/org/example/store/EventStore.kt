@@ -1,9 +1,12 @@
 package org.example.store
 
 import org.example.events.Event
+import org.example.events.EventUpcaster
+import org.example.events.DefaultEventUpcaster
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.map
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -18,7 +21,9 @@ interface EventStore {
     suspend fun subscribePersistence(persistence: FilePersistence)
 }
 
-class InMemoryEventStore : EventStore {
+class InMemoryEventStore(
+    private val upcaster: EventUpcaster = DefaultEventUpcaster()
+) : EventStore {
     private val streams = ConcurrentHashMap<String, MutableList<Event>>()
     private val versions = ConcurrentHashMap<String, AtomicInteger>()
     private val _allEventsFlow = MutableSharedFlow<Event>(replay = 1000)
@@ -67,13 +72,25 @@ class InMemoryEventStore : EventStore {
 
     override suspend fun subscribePersistence(persistence: FilePersistence) {
         this.persistence = persistence
+        val persistedEvents = persistence.loadEvents()
+        persistedEvents.forEach { event ->
+            if (processedIds.add(event.id)) {
+                val stream = streams.getOrPut(event.aggregateId) { mutableListOf() }
+                val currentVersion = versions.getOrPut(event.aggregateId) { AtomicInteger(0) }
+                synchronized(stream) {
+                    stream.add(event)
+                    currentVersion.incrementAndGet()
+                }
+                _allEventsFlow.emit(event)
+            }
+        }
     }
 
     override fun getStream(aggregateId: String): List<Event> {
-        return streams[aggregateId]?.toList() ?: emptyList()
+        return (streams[aggregateId]?.toList() ?: emptyList()).map { upcaster.upcast(it) }
     }
 
-    override fun allEvents(): Flow<Event> = _allEventsFlow.asSharedFlow()
+    override fun allEvents(): Flow<Event> = _allEventsFlow.asSharedFlow().map { upcaster.upcast(it) }
 
     override fun getCurrentVersion(aggregateId: String): Int {
         return versions[aggregateId]?.get() ?: 0

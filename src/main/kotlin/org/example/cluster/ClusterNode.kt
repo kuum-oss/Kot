@@ -9,6 +9,8 @@ import org.example.engine.TradingEngine
 import org.example.events.Event
 import org.example.store.EventStore
 import org.example.store.InMemoryEventStore
+import org.example.store.FilePersistence
+import org.example.query.QuerySide
 import org.slf4j.LoggerFactory
 
 enum class NodeRole { LEADER, FOLLOWER }
@@ -22,11 +24,17 @@ class ClusterNode(
     val eventStore: EventStore = InMemoryEventStore()
     val balanceService = BalanceService()
     val tradingEngine = TradingEngine(eventStore, balanceService, scope)
+    val querySide = QuerySide(eventStore, scope)
     
     private val replicationChannel = Channel<List<Event>>(Channel.BUFFERED)
     private var peers: List<ClusterNode> = emptyList()
 
     init {
+        scope.launch {
+            val persistence = FilePersistence("events-${nodeId}.log", scope)
+            eventStore.subscribePersistence(persistence)
+        }
+
         scope.launch {
             for (events in replicationChannel) {
                 if (role == NodeRole.FOLLOWER) {

@@ -85,7 +85,7 @@ class MatchingActor(
                 
                 val account = balanceService.getAccount(command.userId, currency)
                 if (account.available < requiredAmount) {
-                    println("[DEBUG_LOG] Insufficient funds for user ${command.userId}: needed $requiredAmount, has ${account.available}")
+                    logger.warn("Insufficient funds for user {}: needed {}, has {}", command.userId, requiredAmount, account.available)
                     return
                 }
 
