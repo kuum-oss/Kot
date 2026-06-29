@@ -73,70 +73,77 @@ class FilePersistence(
         if (parts.size < 6) return null
         val type = parts[0]
         val aggregateId = parts[1]
-        val id = UUID.fromString(parts[2])
-        val timestamp = Instant.parse(parts[3])
-        val version = parts[4].toInt()
+        val id = runCatching { UUID.fromString(parts[2]) }.getOrNull() ?: return null
+        val timestamp = runCatching { Instant.parse(parts[3]) }.getOrNull() ?: return null
+        val version = parts[4].toIntOrNull() ?: return null
         val params = parsePayload(parts[5])
 
-        return when (type) {
-            "OrderPlaced" -> OrderPlaced(
-                id = id,
-                aggregateId = aggregateId,
-                timestamp = timestamp,
-                version = version,
-                orderId = UUID.fromString(params["orderId"]),
-                userId = UUID.fromString(params["userId"]),
-                side = Side.valueOf(params["side"]!!),
-                price = BigDecimal(params["price"]),
-                quantity = BigDecimal(params["quantity"])
-            )
-            "OrderMatched" -> OrderMatched(
-                id = id,
-                aggregateId = aggregateId,
-                timestamp = timestamp,
-                version = version,
-                makerOrderId = UUID.fromString(params["makerOrderId"]),
-                takerOrderId = UUID.fromString(params["takerOrderId"]),
-                makerUserId = UUID.fromString(params["makerUserId"]),
-                takerUserId = UUID.fromString(params["takerUserId"]),
-                price = BigDecimal(params["price"]),
-                quantity = BigDecimal(params["quantity"]),
-                side = Side.valueOf(params["side"]!!)
-            )
-            "OrderCancelled" -> OrderCancelled(
-                id = id,
-                aggregateId = aggregateId,
-                timestamp = timestamp,
-                version = version,
-                orderId = UUID.fromString(params["orderId"]),
-                userId = UUID.fromString(params["userId"])
-            )
-            "BalanceChanged" -> BalanceChanged(
-                id = id,
-                aggregateId = aggregateId,
-                timestamp = timestamp,
-                version = version,
-                currency = org.example.domain.Currency.valueOf(params["currency"]!!),
-                amount = BigDecimal(params["amount"]),
-                reason = params["reason"] ?: ""
-            )
-            "BalanceLocked" -> BalanceLocked(
-                id = id,
-                aggregateId = aggregateId,
-                timestamp = timestamp,
-                version = version,
-                currency = org.example.domain.Currency.valueOf(params["currency"]!!),
-                amount = BigDecimal(params["amount"])
-            )
-            "BalanceUnlocked" -> BalanceUnlocked(
-                id = id,
-                aggregateId = aggregateId,
-                timestamp = timestamp,
-                version = version,
-                currency = org.example.domain.Currency.valueOf(params["currency"]!!),
-                amount = BigDecimal(params["amount"])
-            )
-            else -> null
+        fun req(key: String): String? = params[key]?.takeIf { it.isNotEmpty() }
+
+        return runCatching {
+            when (type) {
+                "OrderPlaced" -> OrderPlaced(
+                    id = id,
+                    aggregateId = aggregateId,
+                    timestamp = timestamp,
+                    version = version,
+                    orderId = UUID.fromString(req("orderId") ?: return null),
+                    userId = UUID.fromString(req("userId") ?: return null),
+                    side = Side.valueOf(req("side") ?: return null),
+                    price = BigDecimal(req("price") ?: return null),
+                    quantity = BigDecimal(req("quantity") ?: return null)
+                )
+                "OrderMatched" -> OrderMatched(
+                    id = id,
+                    aggregateId = aggregateId,
+                    timestamp = timestamp,
+                    version = version,
+                    makerOrderId = UUID.fromString(req("makerOrderId") ?: return null),
+                    takerOrderId = UUID.fromString(req("takerOrderId") ?: return null),
+                    makerUserId = UUID.fromString(req("makerUserId") ?: return null),
+                    takerUserId = UUID.fromString(req("takerUserId") ?: return null),
+                    price = BigDecimal(req("price") ?: return null),
+                    quantity = BigDecimal(req("quantity") ?: return null),
+                    side = Side.valueOf(req("side") ?: return null)
+                )
+                "OrderCancelled" -> OrderCancelled(
+                    id = id,
+                    aggregateId = aggregateId,
+                    timestamp = timestamp,
+                    version = version,
+                    orderId = UUID.fromString(req("orderId") ?: return null),
+                    userId = UUID.fromString(req("userId") ?: return null)
+                )
+                "BalanceChanged" -> BalanceChanged(
+                    id = id,
+                    aggregateId = aggregateId,
+                    timestamp = timestamp,
+                    version = version,
+                    currency = org.example.domain.Currency.valueOf(req("currency") ?: return null),
+                    amount = BigDecimal(req("amount") ?: return null),
+                    reason = params["reason"] ?: ""
+                )
+                "BalanceLocked" -> BalanceLocked(
+                    id = id,
+                    aggregateId = aggregateId,
+                    timestamp = timestamp,
+                    version = version,
+                    currency = org.example.domain.Currency.valueOf(req("currency") ?: return null),
+                    amount = BigDecimal(req("amount") ?: return null)
+                )
+                "BalanceUnlocked" -> BalanceUnlocked(
+                    id = id,
+                    aggregateId = aggregateId,
+                    timestamp = timestamp,
+                    version = version,
+                    currency = org.example.domain.Currency.valueOf(req("currency") ?: return null),
+                    amount = BigDecimal(req("amount") ?: return null)
+                )
+                else -> null
+            }
+        }.getOrElse { e ->
+            logger.warn("Failed to deserialize event from line: {}", line, e)
+            null
         }
     }
 
